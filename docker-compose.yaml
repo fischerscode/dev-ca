@@ -1,0 +1,104 @@
+version: '3'
+
+services:
+    pdns-recursor:
+      image: fischerscode/dev-ca.pdns-recursor:latest
+      networks:
+        - pdns
+      volumes:
+        - /etc/localtime:/etc/localtime:ro
+  
+    mariadb:
+      image: mariadb:10.5
+      networks:
+        pdns:
+          aliases:
+            - db
+            - mysql
+      volumes:
+        - /etc/localtime:/etc/localtime:ro
+        - mariadb:/var/lib/mysql:z
+      environment:
+        - MYSQL_ROOT_PASSWORD=my-secret-pw
+      healthcheck:
+        test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost']
+        timeout: 10s
+        retries: 5
+  
+#     phpmyadmin:
+#       image: phpmyadmin/phpmyadmin:5
+#       networks:
+#         - pdns
+#       ports:
+#         - '8988:80'
+#       volumes:
+#         - /etc/localtime:/etc/localtime:ro
+  
+    pdns:
+      image: fischerscode/dev-ca.pdns:latest
+      hostname: ns1.example.com
+      networks:
+        pdns:
+          ipv4_address: 172.7.0.20
+      extra_hosts:
+        - 'ns1.example.com:172.8.0.20'
+      volumes:
+        - /etc/localtime:/etc/localtime:ro
+      environment:
+        - PDNS_gmysql_password=my-secret-pw
+        - PDNS_api=yes
+        - PDNS_api_key=secret
+        - PDNS_webserver=yes
+        - PDNS_webserver_address=0.0.0.0
+        - PDNS_webserver_allow_from=172.7.0.0/16
+        - PDNS_version_string=anonymous
+        - PDNS_default_ttl=1500
+        - PDNS_allow_axfr_ips=172.7.0.21
+        - PDNS_only_notify=172.7.0.21
+      depends_on:
+        - mariadb
+  
+    pdns-admin:
+      image: fischerscode/dev-ca.pdns-admin:latest
+      networks:
+        - pdns
+      volumes:
+        - /etc/localtime:/etc/localtime:ro
+      environment:
+        - PDNS_ADMIN_SQLA_DB_PASSWORD='my-secret-pw'
+        - PDNS_VERSION=4.3
+        - PDNS_API_KEY=secret
+      depends_on:
+        - mariadb
+        - pdns
+  
+    pdns-admin-frontend:
+      image: fischerscode/dev-ca.pdns-admin-frontend:latest
+      networks:
+        - pdns
+      ports:
+        - '8989:80'
+      volumes:
+        - /etc/localtime:/etc/localtime:ro
+      depends_on:
+        - pdns-admin
+
+    ca:
+        image: letsencrypt/pebble
+        command: pebble -dnsserver 172.7.0.20:53
+        ports:
+          - 14000:14000  # ACME port
+          - 15000:15000  # Management port
+        networks:
+            - pdns
+        environment:
+          - PEBBLE_VA_NOSLEEP=1
+networks:
+  pdns:
+    ipam:
+      config:
+        - subnet: 172.7.0.0/16
+          gateway: 172.7.0.1
+
+volumes:
+  mariadb:
